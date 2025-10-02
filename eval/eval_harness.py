@@ -16,12 +16,46 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from openai_client import build_client, CompletionClient
 
 
 SUPPORTED_METHODS = {"regex", "exact", "contains"}
+
+EvaluationHandler = Callable[[Dict[str, str], str, str], Tuple[bool, Optional[str]]]
+
+
+def _eval_regex(expected: Dict[str, str], text: str, case_id: str) -> Tuple[bool, Optional[str]]:
+    pattern = expected.get("pattern", "")
+    try:
+        match = bool(re.search(pattern, text))
+    except re.error as exc:
+        raise ValueError(f"Invalid regex in test {case_id}: {pattern}") from exc
+    if match:
+        return True, None
+    return False, f"Regex '{pattern}' not found"
+
+
+def _eval_exact(expected: Dict[str, str], text: str, _: str) -> Tuple[bool, Optional[str]]:
+    target = expected.get("value", "")
+    if text == target:
+        return True, None
+    return False, f"Exact match failed. Expected '{target}', got '{text}'"
+
+
+def _eval_contains(expected: Dict[str, str], text: str, _: str) -> Tuple[bool, Optional[str]]:
+    target = expected.get("value", "")
+    if target.lower() in text.lower():
+        return True, None
+    return False, f"Missing expected substring '{target}'"
+
+
+_EVALUATION_HANDLERS: Dict[str, EvaluationHandler] = {
+    "regex": _eval_regex,
+    "exact": _eval_exact,
+    "contains": _eval_contains,
+}
 
 
 @dataclass
@@ -37,14 +71,15 @@ class TestCase:
 
     @classmethod
     def from_dict(cls, raw: Dict[str, object]) -> "TestCase":
-        method = str(raw.get("expected_evaluation", {}).get("method", "")).lower()
+        expected_section = {k: str(v) for k, v in raw.get("expected_evaluation", {}).items()}
+        method = expected_section.get("method", "").lower()
         if method not in SUPPORTED_METHODS:
             raise ValueError(f"Unsupported evaluation method '{method}' in test {raw.get('id')}.")
 
         return cls(
             id=str(raw["id"]),
             prompt=str(raw["prompt"]),
-            expected_meta={k: str(v) for k, v in raw.get("expected_evaluation", {}).items()},
+            expected_meta=expected_section,
             evaluation_method=method,
             variant_of=str(raw.get("variant_of")) if raw.get("variant_of") else None,
             perturbs=tuple(str(pid) for pid in raw.get("perturbs", []) if pid),
@@ -58,6 +93,7 @@ class TestResult:
     passed: bool
     score: float
     failure_reason: Optional[str] = None
+    normalized_response: str = ""
 
 
 @dataclass
@@ -87,40 +123,27 @@ def load_test_cases(path: Path) -> List[TestCase]:
 
 
 def evaluate(case: TestCase, response: str) -> TestResult:
-    method = case.evaluation_method
-    expected = case.expected_meta
+    handler = _EVALUATION_HANDLERS.get(case.evaluation_method)
+    if handler is None:
+        raise ValueError(f"Unknown evaluation method: {case.evaluation_method}")
+
     text = response.strip()
-
-    if method == "regex":
-        pattern = expected.get("pattern", "")
-        try:
-            passed = bool(re.search(pattern, text))
-        except re.error as exc:
-            raise ValueError(f"Invalid regex in test {case.id}: {pattern}") from exc
-        score = 1.0 if passed else 0.0
-        reason = None if passed else f"Regex '{pattern}' not found"
-    elif method == "exact":
-        target = expected.get("value", "")
-        passed = text == target
-        score = 1.0 if passed else 0.0
-        reason = None if passed else f"Exact match failed. Expected '{target}', got '{text}'"
-    elif method == "contains":
-        target = expected.get("value", "")
-        passed = target.lower() in text.lower()
-        score = 1.0 if passed else 0.0
-        reason = None if passed else f"Missing expected substring '{target}'"
-    else:
-        raise ValueError(f"Unknown evaluation method: {method}")
-
-    return TestResult(case=case, response=text, passed=passed, score=score, failure_reason=reason)
+    passed, reason = handler(case.expected_meta, text, case.id)
+    return TestResult(
+        case=case,
+        response=text,
+        passed=passed,
+        score=float(passed),
+        failure_reason=reason,
+        normalized_response=normalize_response(text),
+    )
 
 
-def aggregate_consistency(results: List[TestResult]) -> ConsistencyMetrics:
+def aggregate_consistency(results: Sequence[TestResult]) -> ConsistencyMetrics:
     by_id = {result.case.id: result for result in results}
     invariance_pairs = invariance_consistent = 0
     perturb_pairs = perturb_diverged = 0
 
-    # For invariance, compare variant response to canonical parent response.
     for result in results:
         parent_id = result.case.variant_of
         if not parent_id:
@@ -129,17 +152,16 @@ def aggregate_consistency(results: List[TestResult]) -> ConsistencyMetrics:
         if not parent:
             continue
         invariance_pairs += 1
-        if normalize_response(result.response) == normalize_response(parent.response):
+        if result.normalized_response == parent.normalized_response:
             invariance_consistent += 1
 
-    # For perturbations we count when the perturbed prompt leads to a different answer.
     for result in results:
         for parent_id in result.case.perturbs:
             parent = by_id.get(parent_id)
             if not parent:
                 continue
             perturb_pairs += 1
-            if normalize_response(result.response) != normalize_response(parent.response):
+            if result.normalized_response != parent.normalized_response:
                 perturb_diverged += 1
 
     return ConsistencyMetrics(
@@ -155,13 +177,20 @@ def normalize_response(text: str) -> str:
 
 
 def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse.Namespace) -> Dict[str, object]:
+    responder: Callable[[TestCase], str]
+    if args.dry_run:
+        responder = lambda case: f"[dry-run] {case.id}"
+    else:
+        responder = lambda case: client.generate(
+            case.prompt,
+            model=args.model,
+            temperature=args.temperature,
+        )
+
     results: List[TestResult] = []
 
     for case in tests:
-        if args.dry_run:
-            raw_response = f"[dry-run] {case.id}"
-        else:
-            raw_response = client.generate(case.prompt, model=args.model, temperature=args.temperature)
+        raw_response = responder(case)
         test_result = evaluate(case, raw_response)
         results.append(test_result)
         status = "PASS" if test_result.passed else "FAIL"
@@ -169,7 +198,7 @@ def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse
         if test_result.failure_reason:
             print(f"    reason: {test_result.failure_reason}")
 
-    accuracy = sum(r.passed for r in results) / len(results) if results else 0.0
+    accuracy = (sum(result.passed for result in results) / len(results)) if results else 0.0
     consistency = aggregate_consistency(results)
 
     summary = {
@@ -182,26 +211,26 @@ def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse
     }
 
     if args.output_dir:
-        path = Path(args.output_dir)
-        path.mkdir(parents=True, exist_ok=True)
+        summary_path = Path(args.output_dir)
+        summary_path.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         payload = {
             "summary": summary,
             "results": [
                 {
-                    "id": r.case.id,
-                    "prompt": r.case.prompt,
-                    "response": r.response,
-                    "passed": r.passed,
-                    "score": r.score,
-                    "failure_reason": r.failure_reason,
-                    "variant_of": r.case.variant_of,
-                    "perturbs": list(r.case.perturbs),
+                    "id": result.case.id,
+                    "prompt": result.case.prompt,
+                    "response": result.response,
+                    "passed": result.passed,
+                    "score": result.score,
+                    "failure_reason": result.failure_reason,
+                    "variant_of": result.case.variant_of,
+                    "perturbs": list(result.case.perturbs),
                 }
-                for r in results
+                for result in results
             ],
         }
-        outfile = path / f"eval_{timestamp}.json"
+        outfile = summary_path / f"eval_{timestamp}.json"
         outfile.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(f"Saved detailed report to {outfile}")
 
