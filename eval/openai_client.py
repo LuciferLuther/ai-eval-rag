@@ -41,8 +41,35 @@ class OpenAIChatClient(CompletionClient):
 class MockEchoClient(CompletionClient):
     suffix: str = ""
 
-    def generate(self, prompt: str, **kwargs) -> str:  # pragma: no cover - trivial
-        return f"[mock]{self.suffix} {prompt}".strip()
+    def generate(self, prompt: str, **kwargs) -> str:  # pragma: no cover - lightweight shim
+        """Return canned answers so the mock behaves like a tiny FAQ."""
+
+        def reply(text: str) -> str:
+            suffix = f" {self.suffix}" if self.suffix else ""
+            return f"{text}{suffix}".strip()
+
+        prompt_lc = prompt.lower()
+
+        if "library card" in prompt_lc or ("card" in prompt_lc and "libr" in prompt_lc):
+            return reply("Bring a photo ID and proof of address to the front desk to get your library card.")
+        if "renew" in prompt_lc and "book" in prompt_lc:
+            return reply("Renew twice from the My Account page, but holds stop additional renewals.")
+        if "late fee" in prompt_lc or "forget to return" in prompt_lc:
+            return reply("Overdue books cost 25 cents per day with a five dollar maximum.")
+        if "print" in prompt_lc or "printing" in prompt_lc:
+            return reply("Ten cents per page for black-and-white prints and fifty cents per page for color.")
+        if "storytime" in prompt_lc:
+            return reply("Children's storytime runs Tuesdays and Thursdays at 10 a.m. in the community room.")
+        if ("meeting room" in prompt_lc) or ("reserve" in prompt_lc and "room" in prompt_lc):
+            return reply("Reserve the meeting room up to four hours per week and book online up to two weeks ahead.")
+        if "wi-fi" in prompt_lc or "wifi" in prompt_lc:
+            return reply("The Wi-Fi password is posted on signs at every table.")
+        if "volunteer" in prompt_lc:
+            return reply("Fill out the volunteer interest form and attend the monthly orientation to get started.")
+        if "donate" in prompt_lc:
+            return reply("We accept gently used books from the last five years; drop them off Saturdays 9 a.m. to noon.")
+
+        return reply(f"[mock] {prompt}")
 
 
 def build_client(kind: str = "openai") -> CompletionClient:
