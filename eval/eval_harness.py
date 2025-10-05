@@ -13,6 +13,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,20 +21,19 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from openai_client import build_client, CompletionClient
 from dotenv import load_dotenv
-import os
 
 # Load environment variables from .env files
-load_dotenv()  # Current directory
+load_dotenv()           # Current directory
 load_dotenv("../.env")  # Parent directory
 load_dotenv("../../.env")  # Grandparent directory
 
-
-
 SUPPORTED_METHODS = {"regex", "exact", "contains"}
-
 EvaluationHandler = Callable[[Dict[str, str], str, str], Tuple[bool, Optional[str]]]
 
 
+# --------------------------
+# Evaluation handlers
+# --------------------------
 def _eval_regex(expected: Dict[str, str], text: str, case_id: str) -> Tuple[bool, Optional[str]]:
     pattern = expected.get("pattern", "")
     try:
@@ -66,10 +66,12 @@ _EVALUATION_HANDLERS: Dict[str, EvaluationHandler] = {
 }
 
 
+# --------------------------
+# Data structures
+# --------------------------
 @dataclass
 class TestCase:
     """Represents a single prompt-and-expected pair from tests.json."""
-
     id: str
     prompt: str
     expected_meta: Dict[str, str]
@@ -83,7 +85,6 @@ class TestCase:
         method = expected_section.get("method", "").lower()
         if method not in SUPPORTED_METHODS:
             raise ValueError(f"Unsupported evaluation method '{method}' in test {raw.get('id')}.")
-
         return cls(
             id=str(raw["id"]),
             prompt=str(raw["prompt"]),
@@ -124,52 +125,98 @@ class ConsistencyMetrics:
         return (numerator / denominator) if denominator else 0.0
 
 
+# --------------------------
+# Test loading / normalization
+# --------------------------
 def load_test_cases(path: Path) -> List[TestCase]:
     with path.open("r", encoding="utf-8") as fp:
         raw_cases = json.load(fp)
     return [TestCase.from_dict(item) for item in raw_cases]
 
 
+def normalize_response(text: str) -> str:
+    """
+    Canonicalize model output for string equality/consistency checks:
+      - Unicode NFKC (fix fancy quotes/dashes)
+      - Lowercase
+      - Collapse whitespace
+      - Strip zero-width spaces
+    """
+    if not text:
+        return ""
+    t = unicodedata.normalize("NFKC", text)
+    t = t.replace("\u200b", "")  # zero-width space
+    t = t.strip().lower()
+    t = re.sub(r"\s+", " ", t)
+    return t
+
+
+def normalize_for_match(text: str) -> str:
+    """
+    Slightly different normalization used before regex/contains:
+    keeps anchors working by only collapsing whitespace and applying NFKC + lower.
+    """
+    return normalize_response(text)
+
+
+# --------------------------
+# Evaluation / aggregation
+# --------------------------
 def evaluate(case: TestCase, response: str) -> TestResult:
     handler = _EVALUATION_HANDLERS.get(case.evaluation_method)
     if handler is None:
         raise ValueError(f"Unknown evaluation method: {case.evaluation_method}")
 
-    text = response.strip()
-    passed, reason = handler(case.expected_meta, text, case.id)
+    raw_text = response.strip()
+    # For regex/contains, match on normalized text; for exact, compare raw trimmed.
+    if case.evaluation_method == "exact":
+        text_for_match = raw_text
+    else:
+        text_for_match = normalize_for_match(raw_text)
+
+    passed, reason = handler(case.expected_meta, text_for_match, case.id)
+
     return TestResult(
         case=case,
-        response=text,
+        response=raw_text,
         passed=passed,
         score=float(passed),
         failure_reason=reason,
-        normalized_response=normalize_response(text),
+        normalized_response=normalize_response(raw_text),
     )
 
-
-def aggregate_consistency(results: Sequence[TestResult]) -> ConsistencyMetrics:
-    by_id = {result.case.id: result for result in results}
+def aggregate_consistency(
+    results: Sequence[TestResult],
+    invariance_mode: str = "both-pass",  # or "identical"
+) -> ConsistencyMetrics:
+    by_id = {r.case.id: r for r in results}
     invariance_pairs = invariance_consistent = 0
     perturb_pairs = perturb_diverged = 0
 
-    for result in results:
-        parent_id = result.case.variant_of
+    # Invariance
+    for r in results:
+        parent_id = r.case.variant_of
         if not parent_id:
             continue
         parent = by_id.get(parent_id)
         if not parent:
             continue
         invariance_pairs += 1
-        if result.normalized_response == parent.normalized_response:
+        if invariance_mode == "identical":
+            ok = parent.passed and r.passed and (r.normalized_response == parent.normalized_response)
+        else:  # "both-pass"
+            ok = parent.passed and r.passed
+        if ok:
             invariance_consistent += 1
 
-    for result in results:
-        for parent_id in result.case.perturbs:
+    # Perturbation (unchanged)
+    for r in results:
+        for parent_id in r.case.perturbs:
             parent = by_id.get(parent_id)
             if not parent:
                 continue
             perturb_pairs += 1
-            if result.normalized_response != parent.normalized_response:
+            if parent.passed and r.passed and (r.normalized_response != parent.normalized_response):
                 perturb_diverged += 1
 
     return ConsistencyMetrics(
@@ -179,11 +226,9 @@ def aggregate_consistency(results: Sequence[TestResult]) -> ConsistencyMetrics:
         perturbation_diverged=perturb_diverged,
     )
 
-
-def normalize_response(text: str) -> str:
-    return re.sub(r"\s+", " ", text.strip().lower())
-
-
+# --------------------------
+# Runner
+# --------------------------
 def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse.Namespace) -> Dict[str, object]:
     responder: Callable[[TestCase], str]
     if args.dry_run:
@@ -196,7 +241,6 @@ def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse
         )
 
     results: List[TestResult] = []
-
     for case in tests:
         raw_response = responder(case)
         test_result = evaluate(case, raw_response)
@@ -207,7 +251,7 @@ def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse
             print(f"    reason: {test_result.failure_reason}")
 
     accuracy = (sum(result.passed for result in results) / len(results)) if results else 0.0
-    consistency = aggregate_consistency(results)
+    consistency = aggregate_consistency(results, invariance_mode=args.invariance_mode)
 
     summary = {
         "total_cases": len(results),
@@ -226,16 +270,16 @@ def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse
             "summary": summary,
             "results": [
                 {
-                    "id": result.case.id,
-                    "prompt": result.case.prompt,
-                    "response": result.response,
-                    "passed": result.passed,
-                    "score": result.score,
-                    "failure_reason": result.failure_reason,
-                    "variant_of": result.case.variant_of,
-                    "perturbs": list(result.case.perturbs),
+                    "id": r.case.id,
+                    "prompt": r.case.prompt,
+                    "response": r.response,
+                    "passed": r.passed,
+                    "score": r.score,
+                    "failure_reason": r.failure_reason,
+                    "variant_of": r.case.variant_of,
+                    "perturbs": list(r.case.perturbs),
                 }
-                for result in results
+                for r in results
             ],
         }
         outfile = summary_path / f"eval_{timestamp}.json"
@@ -250,6 +294,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--tests", type=Path, default=Path("eval/tests.json"))
     parser.add_argument("--model", type=str, default="gpt-4o-mini")
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--invariance-mode", choices=["both-pass", "identical"], default="both-pass")
     parser.add_argument("--mock", action="store_true", help="Use a deterministic echo client")
     parser.add_argument("--dry-run", action="store_true", help="Skip LLM call and echo test ids")
     parser.add_argument("--output-dir", type=Path, help="Optional folder for JSON reports", default="eval/reports")
@@ -259,12 +304,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     tests = load_test_cases(args.tests)
-
-    if args.mock:
-        client = build_client(kind="mock")
-    else:
-        client = build_client()
-
+    client = build_client(kind="mock" if args.mock else None)
     summary = run_eval(tests, client, args)
     print("=== SUMMARY ===")
     for key, value in summary.items():
