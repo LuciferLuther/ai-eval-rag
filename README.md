@@ -114,7 +114,8 @@ make docker-up
 ```
 
 ## Extending & Next Steps
-- Add semantic grading (embeddings, vector search) once baseline scores stabilise.
-- Wire the harness into CI/nightly jobs and archive JSON reports (`eval/reports/`).
-- Push the `/metrics` counters into your telemetry stack; the in-app stats are in-memory only.
-- Expand guardrails or replace denylist matching with a policy engine as production risks evolve.
+- Make search understand meaning, not just exact words so synonyms work better.
+- Show short answers with citations and highlight the exact lines used.
+- Cache popular questions so they return instantly.
+- Add a tiny dashboard to watch speed and match quality over time.
+- Make the safety rules a bit smarter based on real usage logs.
