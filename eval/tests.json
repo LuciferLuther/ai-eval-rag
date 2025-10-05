@@ -6,8 +6,8 @@
     "prompt": "How do I get a library card?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)(photo\\s*id|photo\\s*identification).*(proof\\s*of\\s*address)",
-      "explanation": "Response should mention bringing both a photo ID and proof of address."
+      "pattern": "(?i)(?=.*photo)(?=.*(id|identification))(?=.*proof)(?=.*address)",
+      "explanation": "Response should mention bringing both a photo ID and proof of address (order agnostic)."
     },
     "metadata": {
       "category": "membership",
@@ -22,7 +22,7 @@
     "variant_of": "syn_01_get_library_card",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)(photo\\s*id|photo\\s*identification).*(proof\\s*of\\s*address)",
+      "pattern": "(?i)(?=.*photo)(?=.*(id|identification))(?=.*proof)(?=.*address)",
       "explanation": "Invariance test: typos should not change the card signup answer."
     },
     "metadata": {
@@ -37,8 +37,8 @@
     "prompt": "Can I renew my books online, and what if someone else puts a hold on them?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)my\\s+account.*hold",
-      "explanation": "Answer should mention renewing from My Account and that holds block extra renewals."
+      "pattern": "(?i)(?=.*(my\\s+account|online\\s+account))(?=.*hold)",
+      "explanation": "Answer should mention renewing from My Account (or online account) and that holds block extra renewals."
     },
     "metadata": {
       "category": "borrowing",
@@ -52,8 +52,8 @@
     "prompt": "What's the late fee if I forget to return a book on time?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)25\\s*cents.*five\\s*dollar",
-      "explanation": "Response must cite the 25 cents per day fee and the five dollar cap."
+      "pattern": "(?i)(?=.*(25\\s*cents|\\$0\\.25))(?=.*(five\\s*dollar|\\$5))",
+      "explanation": "Response must cite the 25 cents per day fee and the five dollar cap (any order)."
     },
     "metadata": {
       "category": "borrowing",
@@ -70,7 +70,7 @@
     ],
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)ten\\s*cents.*black.*fifty\\s*cents.*color",
+      "pattern": "(?i)(?=.*(ten\\s*cents|10\\s*cents|\\$0\\.10))(?=.*(fifty\\s*cents|50\\s*cents|\\$0\\.50))(?=.*(black|black-and-white|black and white))(?=.*color)",
       "explanation": "Answer should list ten cents for black-and-white and fifty cents for color."
     },
     "metadata": {
@@ -79,78 +79,78 @@
     }
   },
   {
-    "id": "real_01_storytime_schedule",
+    "id": "real_01_cross_validation_metrics",
     "type": "real",
-    "source": "Programming calendar FAQ (adapted)",
-    "prompt": "When exactly is children's storytime held?",
+    "source": "M&A cross-validation assistant launch deck (redacted)",
+    "prompt": "In the cross-validation chatbot we deployed for the M&A analysts, which checkpoints did we say to confirm before flagging an alert?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)tuesday.*thursday.*10\\s*a\\.?m",
-      "explanation": "Should mention Tuesday and Thursday sessions at 10 a.m."
+      "pattern": "(?i)(?=.*(five|5))(?=.*metric)(?=.*revenue)",
+      "explanation": "Answer should recall the five critical financial metrics and call out revenue validation."
     },
     "metadata": {
-      "category": "events",
-      "notes": "Storytime schedule"
+      "category": "financial_ops",
+      "notes": "Redacted banking engagement refresher"
     }
   },
   {
-    "id": "real_02_meeting_room_booking",
+    "id": "real_02_fire_safety_sequence",
     "type": "real",
-    "source": "Facilities policy note (adapted)",
-    "prompt": "How do we book the meeting room and are there limits?",
+    "source": "Fire safety compliance automation playbook (redacted)",
+    "prompt": "From that fire safety comms workflow we built, remind me which days we scheduled the outbound sends and the follow-up blocks?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)(four\\s+hours|4\\s+hours).*(two\\s+weeks|2\\s+weeks)",
-      "explanation": "Needs to cite the four-hour weekly limit and the two-week advance booking window."
+      "pattern": "(?i)(?=.*monday)(?=.*wednesday)(?=.*(tuesday|thursday|friday))",
+      "explanation": "Response should mention Monday/Wednesday primaries plus mid-week follow-up days."
     },
     "metadata": {
-      "category": "rooms",
-      "notes": "Meeting room reservations"
+      "category": "compliance_ops",
+      "notes": "Weekly sequencing pattern from Spain portfolio"
     }
   },
   {
-    "id": "real_03_wifi_password",
+    "id": "real_03_inspection_automation",
     "type": "real",
-    "source": "Front desk cheat sheet (adapted)",
-    "prompt": "Where do I find the Wi-Fi password when I'm in the library?",
+    "source": "Voice outreach automation migration notes (redacted)",
+    "prompt": "On the inspection outreach automation we rolled out, what impact figure did we cite and which messaging channels were covered?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)password.*table",
-      "explanation": "Answer should note the password is posted at each table."
+      "pattern": "(?i)(?=.*70\\s*%)(?=.*(sms|text|whatsapp))",
+      "explanation": "Expect mention of the 70% administrative cost reduction and at least one messaging channel."
     },
     "metadata": {
-      "category": "technology",
-      "notes": "Wi-Fi location info"
+      "category": "field_ops",
+      "notes": "Redacted fire safety inspection automation"
     }
   },
   {
-    "id": "real_04_volunteer_orientation",
+    "id": "real_04_roast_feature_flags",
     "type": "real",
-    "source": "Volunteer handbook (adapted)",
-    "prompt": "What steps do I take to start volunteering at the library?",
+    "source": "ROAST assistant governance memo (redacted)",
+    "prompt": "For the multi-tenant assistant MVP, what did we say about feature flags and how teams without engineers could use them?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)interest\\s+form.*orientation",
-      "explanation": "Should direct them to submit the interest form and attend orientation."
+      "pattern": "(?i)(?=.*feature\\s*flag)(?=.*non-technical)",
+      "explanation": "Answer should note the feature flag system empowering non-technical teams."
     },
     "metadata": {
-      "category": "community",
-      "notes": "Volunteer onboarding"
+      "category": "platform_ops",
+      "notes": "Redacted agency enablement guidance"
     }
   },
   {
-    "id": "real_05_donation_guidelines",
+    "id": "real_05_medical_booking_accuracy",
     "type": "real",
-    "source": "Donation policy sheet (adapted)",
-    "prompt": "We want to donate books—any rules on condition or drop-off times?",
+    "source": "Healthcare booking assistant postmortem (redacted)",
+    "prompt": "When stakeholders asked about the medical booking assistant, how did we justify the accuracy lift and what retrieval approach was in scope?",
     "expected_evaluation": {
       "method": "regex",
-      "pattern": "(?i)(five\\s+years|5\\s+years).*(saturday|sat).*9\\s*a\\.?m",
-      "explanation": "Needs to state donations should be recent (within five years) and dropped off Saturday mornings."
+      "pattern": "(?i)(?=.*30\\s*%)(?=.*(hybrid|vector))",
+      "explanation": "Response should cite the 30% accuracy boost and reference the hybrid/vector retrieval approach."
     },
     "metadata": {
-      "category": "donations",
-      "notes": "Donation window and condition"
+      "category": "healthcare_ai",
+      "notes": "Redacted medical scheduling engagement"
     }
   }
 ]

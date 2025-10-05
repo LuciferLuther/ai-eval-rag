@@ -14,11 +14,19 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from openai_client import build_client, CompletionClient
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env files
+load_dotenv()  # Current directory
+load_dotenv("../.env")  # Parent directory
+load_dotenv("../../.env")  # Grandparent directory
+
 
 
 SUPPORTED_METHODS = {"regex", "exact", "contains"}
@@ -213,7 +221,7 @@ def run_eval(tests: Sequence[TestCase], client: CompletionClient, args: argparse
     if args.output_dir:
         summary_path = Path(args.output_dir)
         summary_path.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         payload = {
             "summary": summary,
             "results": [
@@ -244,7 +252,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--mock", action="store_true", help="Use a deterministic echo client")
     parser.add_argument("--dry-run", action="store_true", help="Skip LLM call and echo test ids")
-    parser.add_argument("--output-dir", type=Path, help="Optional folder for JSON reports")
+    parser.add_argument("--output-dir", type=Path, help="Optional folder for JSON reports", default="eval/reports")
     return parser.parse_args(argv)
 
 

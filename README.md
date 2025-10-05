@@ -17,26 +17,26 @@ make run-api      # start FastAPI with reload
 make smoke        # smoke test against a running API instance
 ```
 
-## Question 1 � Prompt Reliability Mini-Harness
+## Question 1 - Prompt Reliability Mini-Harness
 
-- **Test set** lives in `eval/tests.json` with 10 cases (5 synthetic + 5 redacted real-world edge cases). Synthetic items include explicit generation rules in `generation_rule`, covering account recovery, compliance export, usage guardrails, and billing scenarios.
-- **Invariance test:** `syn_02_reset_password_mobile_invariance` paraphrases `syn_01` with typos to ensure the response remains stable.
-- **Perturbation test:** `syn_05_billing_perturbation` injects a distractor clause while expecting the budget guardrail answer to stay precise.
+- **Test set** lives in `eval/tests.json` with 10 cases (5 synthetic + 5 anonymised real-world scenarios). Synthetic prompts cover everyday library help-desk flows (card signup, renewals, printing, events). The real prompts anonymise prior client engagements (financial cross-validation, fire safety automation, agency tooling, healthcare booking) while preserving their key facts.
+- **Invariance test:** `syn_02_get_library_card_invariance` paraphrases `syn_01` with slang and typos to ensure the signup policy answer stays consistent.
+- **Perturbation test:** `syn_05_printing_perturbation` adds an unrelated Wi-Fi clause while expecting the pricing policy to remain precise.
 - **Harness:** `eval/eval_harness.py` loads the suite, calls into `eval/openai_client.py`, and scores responses with regex/exact/substring checks. It reports accuracy plus invariance and perturbation consistency rates. Use `--mock` for deterministic output or supply a real API key.
 - **Automation:** `scripts/run_eval.sh` wraps the harness for CI or local runs, and `make eval` defaults to the mock client.
 - **Ship vs. later:**
-  - Ship now: curate the mixed test set, land the harness + reporting, wire it into CI/nightly runs.
-  - Later: add semantic scoring (e.g. embeddings), persist trend dashboards, and auto-diff regression explanations for failing variants.
+  - Ship now: keep curating the test mix, land the harness + reporting, wire it into CI/nightly runs.
+  - Later: add semantic grading (e.g. embeddings), persist trend dashboards, and auto-diff regression explanations for failing variants.
 
-## Question 2 � Retrieval + Guardrails FastAPI Prototype
+## Question 2 - Retrieval + Guardrails FastAPI Prototype
 
-- **Corpus:** `rag_api/corpus.py` defines 12 purpose-written snippets spanning security, billing, compliance, and integrations. `CorpusIndex` builds a TF-IDF matrix with support for cosine or raw dot-product similarity.
-- **Endpoint:** `POST /answer` (implemented in `rag_api/app.py`) accepts `query`, optional `k`, and `similarity`. It returns the naive answer plus top-k snippets.
-- **Guardrail:** `rag_api/guardrails.py` enforces a denylist for credential/PII-seeking queries, short-circuiting the answer. This is practical because it blocks high-risk requests without adding latency and can be extended with analytics.
-- **Index comparison:** Switch `similarity` between `cosine` and `dot`. Cosine is the default; it normalises vectors and produced tighter rankings on mixed-length snippets, while dot-product is exposed for experimentation when raw term frequency matters (see response `index_config`).
+- **Corpus:** `rag_api/corpus.py` defines 12 purpose-written snippets framed as a community library FAQ (cards, renewals, printing, events, volunteering, donations). `CorpusIndex` builds a TF-IDF matrix with support for cosine or raw dot-product similarity.
+- **Endpoint:** `POST /answer` (implemented in `rag_api/app.py`) accepts `query`, optional `k`, and `similarity`. It returns the naive answer plus the top-k snippets.
+- **Guardrail:** `rag_api/guardrails.py` enforces a denylist for credential/PII-seeking queries, short-circuiting the answer. This keeps risky requests blocked without adding latency and can be expanded with analytics.
+- **Index comparison:** Switch `similarity` between `cosine` and `dot`. Cosine normalises vectors for balanced snippets, while dot-product is exposed for experiments when raw term frequency matters (see response `index_config`).
 - **Monitoring metrics:**
-  1. **P95 end-to-end latency** � capture via FastAPI middleware logging into e.g. OpenTelemetry.
-  2. **Retrieval hit-rate** � percentage of queries whose top score exceeds a relevance threshold; log alongside query metadata to surface drift.
+  1. **P95 end-to-end latency** - capture via FastAPI middleware logging into tooling such as OpenTelemetry.
+  2. **Retrieval hit-rate** - percentage of queries whose top score exceeds a relevance threshold; log alongside query metadata to surface drift.
 - **Smoke test:** once the API is running (`make run-api`), execute `scripts/smoke_api.sh` to hit `/health` and `/answer`.
 
 ## Docker & Compose

@@ -4,6 +4,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Protocol
+from dotenv import load_dotenv
+
+# Load environment variables from .env files
+load_dotenv()  # Current directory
+load_dotenv("../.env")  # Parent directory
+load_dotenv("../../.env")  # Grandparent directory
 
 
 class CompletionClient(Protocol):
@@ -14,9 +20,9 @@ class CompletionClient(Protocol):
 @dataclass
 class OpenAIChatClient(CompletionClient):
     api_key: str
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-4.1-mini"
     base_url: Optional[str] = None
-    default_kwargs: Dict[str, object] = field(default_factory=lambda: {"temperature": 0.0, "max_output_tokens": 512})
+    default_kwargs: Dict[str, object] = field(default_factory=lambda: {"temperature": 0.0, "max_output_tokens": 1024})
 
     def __post_init__(self) -> None:
         from openai import OpenAI  # lazy import to keep startup lean
@@ -68,6 +74,16 @@ class MockEchoClient(CompletionClient):
             return reply("Fill out the volunteer interest form and attend the monthly orientation to get started.")
         if "donate" in prompt_lc:
             return reply("We accept gently used books from the last five years; drop them off Saturdays 9 a.m. to noon.")
+        if "cross-validation" in prompt_lc or "m&a" in prompt_lc:
+            return reply("Confirm the five critical financial metrics, especially revenue, before raising an alert.")
+        if "fire safety" in prompt_lc and ("workflow" in prompt_lc or "comms" in prompt_lc):
+            return reply("Send the primaries on Monday and Wednesday, then follow up Tuesday through Friday as scheduled.")
+        if "inspection" in prompt_lc and ("automation" in prompt_lc or "outreach" in prompt_lc):
+            return reply("It delivered a 70% drop in admin cost across SMS and WhatsApp outreach.")
+        if "feature flag" in prompt_lc or "non-technical" in prompt_lc:
+            return reply("Feature flags let non-technical teams toggle access without engineering support.")
+        if "medical" in prompt_lc and "booking" in prompt_lc:
+            return reply("We cited a 30% accuracy lift driven by the hybrid vector retrieval stack.")
 
         return reply(f"[mock] {prompt}")
 
